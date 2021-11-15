@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Webamp on Swarm</title>
+</head>
+
+<body style="margin: 0; padding: 0" ondrop="dropHandler(event);" ondragover="dragOverHandler(event);">
+    <span id="status" style="display: flex; justify-content: center; font-family: Arial, Arial, sans-serif; position: absolute; width: 100vw; top: 10px;"></span>
+    <div id="app" style="height: 100vh">
+        <!-- Webamp will attempt to center itself within this div -->
+    </div>
+    <span id="bottom" style="display: flex; justify-content: center; font-family: Arial, Arial, sans-serif; position: absolute; width: 100vw; bottom: 10px;"><a href="https://webamp.org/">Webamp</a>&nbsp;on&nbsp;<a href="https://ethswarm.org/"> Swarm</a></span>
+    <script src="https://unpkg.com/webamp@1.4.2/built/webamp.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+    <script src="https://unpkg.com/@ethersphere/bee-js/dist/index.browser.min.js"></script>
+    <script src="tracks.js"></script>
+    <script>
+        const Webamp = window.Webamp;
+        const webamp = new Webamp({ initialTracks,  });
+
+        // Returns a promise indicating when it's done loading.
+        webamp.renderWhenReady(document.getElementById('app'));
+
+        const help = 'Drag songs over the page to upload'
+        setStatus(help)
+
+        let isLoading = false
+
+        function setStatus(innerHTML) {
+          document.getElementById('status').innerHTML = innerHTML
+        }
+
+        function showLoadIndicator(message) {
+          let count = 0
+          function step() {
+            if (isLoading) {
+              setStatus(message + '.'.repeat(count) + '&nbsp;'.repeat(4 - count))
+              count = (count + 1) % 4
+              setTimeout(step, 500)
+            }
+          }
+          step()
+        }
+
+        function dragOverHandler(event) {
+          event.preventDefault();
+          event.currentTarget.style.background = "lightyellow";
+        }
+
+        function dropHandler(event) {
+          event.currentTarget.style.background = "white";
+          event.preventDefault();
+          event.stopPropagation();
+          const files = []
+
+          if (event.dataTransfer.items) {
+            // Use DataTransferItemList interface to access the file(s)
+            for (var i = 0; i < event.dataTransfer.items.length; i++) {
+              // If dropped items aren't files, reject them
+              if (event.dataTransfer.items[i].kind === 'file') {
+                var file = event.dataTransfer.items[i].getAsFile();
+                console.log('... file[' + i + '].name = ' + file.name);
+                files.push(file)
+              }
+            }
+          } else {
+            // Use DataTransfer interface to access the file(s)
+            for (var i = 0; i < event.dataTransfer.files.length; i++) {
+              console.log('... file[' + i + '].name = ' + event.dataTransfer.files[i].name);
+              var file = event.dataTransfer.files[i]
+              files.push(file)
+            }
+          }
+
+          console.log({ files })
+
+          readFileTags(files)
+        }
+
+        function readFileTag(file) {
+          return new Promise((resolve, reject) => {
+            window.jsmediatags.read(file, {
+              onSuccess: function(tag) {
+                resolve(tag)
+              }
+            })
+          })
+        }
+
+        async function readFileTags(files) {
+          const tracks = []
+          if (files.length > 0) {
+            for (var i = 0; i < files.length; i++) {
+              var file = files[i]
+              var tag = await readFileTag(file)
+              tracks.push({
+                metaData: {
+                  artist: tag.tags.artist,
+                  title: tag.tags.title,
+                },
+                url: file.name,
+                blob: file,
+              })
+            }
+            console.log({tracks, tag})
+            webamp.setTracksToPlay(tracks.map(t => ({ metaData: t.metaData, blob: t.blob })))
+            uploadTracks(tracks, files)
+          }
+        }
+
+        function uploadTracks(tracks, files) {
+          setStatus(help) // so that it is included in the uploaded page
+
+          const beeUrl = 'https://bee-9.gateway.ethswarm.org'
+          const bee = new BeeJs.Bee(beeUrl)
+          const tracksData = `var initialTracks = ${JSON.stringify(tracks)}`
+          const tracksFile = new File([tracksData], 'tracks.js')
+          const indexData = document.getElementsByTagName("HTML")[0].outerHTML;
+          const indexFile = new File([indexData], "index.html")
+
+          isLoading = true
+          showLoadIndicator('Uploading')
+
+          bee
+            .uploadFiles(
+              '0000000000000000000000000000000000000000000000000000000000000000',
+              [tracksFile, indexFile, ...files],
+              { indexDocument: 'index.html' },
+            )
+            .then(response => {
+              isLoading = false
+              const href = `${beeUrl}/bzz/${response.reference}/`
+              console.log(href)
+              const link = document.createElement('a')
+              link.href = href
+              link.innerText = href
+              setStatus(link.outerHTML)
+            })
+        }
+    </script>
+</body>
+
+</html>
